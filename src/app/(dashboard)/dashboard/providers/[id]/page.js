@@ -1574,7 +1574,7 @@ export default function ProviderDetailPage() {
                         size="sm"
                         variant="secondary"
                         icon={allSelectedInactive ? "power_settings_new" : "block"}
-                        onClick={() => handleBulkSetActive(!allSelectedInactive)}
+                        onClick={() => handleBulkSetActive(allSelectedInactive)}
                       >
                         {allSelectedInactive ? "Enable" : "Disable"} Selected ({selectedConnectionIds.length})
                       </Button>
