@@ -13,7 +13,7 @@ function isLLMProvider(id) {
 import Badge from "./Badge";
 import Card from "./Card";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
-import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
+import UsageTable, { fmt, fmtTime, fmtTokens } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
@@ -21,8 +21,15 @@ const UsageChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/compo
 const ProviderBarChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderBarChart"), { ssr: false });
 const TopModelsChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/TopModelsChart"), { ssr: false });
 
+// Server clock minus browser clock, refreshed from every stats payload, so
+// "ago" never goes negative when the two clocks drift.
+let serverClockOffset = 0;
+function syncServerClock(serverNow) {
+  if (typeof serverNow === "number") serverClockOffset = serverNow - Date.now();
+}
+
 function timeAgo(timestamp) {
-  const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
+  const diff = Math.max(0, Math.floor((Date.now() + serverClockOffset - new Date(timestamp)) / 1000));
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
@@ -56,9 +63,11 @@ function RecentRequests({ requests = [] }) {
           <table className="w-full min-w-[300px] border-collapse text-xs">
             <thead className="sticky top-0 bg-bg z-10">
               <tr className="border-b border-border">
-                <th className="py-1.5 text-left font-semibold text-text-muted w-2"></th>
+                <th className="py-1.5 text-left font-semibold text-text-muted w-4"></th>
                 <th className="py-1.5 text-left font-semibold text-text-muted">Model</th>
-                <th className="py-1.5 text-right font-semibold text-text-muted whitespace-nowrap">In / Out</th>
+                <th className="py-1.5 text-right font-semibold text-text-muted">In</th>
+                <th className="py-1.5 text-right font-semibold text-text-muted" title="Cache read / write">Cache</th>
+                <th className="py-1.5 text-right font-semibold text-text-muted">Out</th>
                 <th className="py-1.5 text-right font-semibold text-text-muted">When</th>
               </tr>
             </thead>
@@ -67,16 +76,21 @@ function RecentRequests({ requests = [] }) {
                 const ok = !r.status || r.status === "ok" || r.status === "success";
                 return (
                   <tr key={i} className="hover:bg-bg-subtle transition-colors">
-                    <td className="py-1.5">
-                      <span className={`block w-1.5 h-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />
+                    <td className="py-1.5 pr-1.5 align-middle">
+                      <span className={`mx-auto block size-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />
                     </td>
-                    <td className="py-1.5 font-mono truncate max-w-[120px]" title={r.model}>{r.model}</td>
-                    <td className="py-1.5 text-right whitespace-nowrap">
-                      <span className="text-primary">{fmt(r.promptTokens)}↑</span>
-                      {" "}
-                      <span className="text-success">{fmt(r.completionTokens)}↓</span>
+                    <td className="py-1.5 max-w-[140px]" title={`${r.provider}/${r.model}`}>
+                      <div className="font-mono truncate">{r.model}</div>
+                      <div className="text-[10px] text-text-muted truncate">{r.provider}</div>
                     </td>
-                    <td className="py-1.5 text-right text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></td>
+                    <td className="py-1.5 pl-2 text-right whitespace-nowrap text-primary" title={fmt(r.promptTokens)}>{fmtTokens(r.promptTokens)}</td>
+                    <td className="py-1.5 pl-2 text-right whitespace-nowrap text-text-muted" title={`read ${fmt(r.cachedTokens)} / write ${fmt(r.cacheWriteTokens)}`}>
+                      {r.cachedTokens || r.cacheWriteTokens
+                        ? `${fmtTokens(r.cachedTokens)}${r.cacheWriteTokens ? ` / ${fmtTokens(r.cacheWriteTokens)}` : ""}`
+                        : "—"}
+                    </td>
+                    <td className="py-1.5 pl-2 text-right whitespace-nowrap text-success" title={fmt(r.completionTokens)}>{fmtTokens(r.completionTokens)}</td>
+                    <td className="py-1.5 pl-2 text-right text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></td>
                   </tr>
                 );
               })}
@@ -217,6 +231,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const [viewMode, setViewMode] = useState("costs");
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
+  const [providerFilter, setProviderFilter] = useState("");
   const isInitialLoad = useRef(true);
   const hasLoadedStats = useRef(false);
   const period = periodProp ?? periodLocal;
@@ -265,10 +280,13 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       setFetching(true);
     }
 
-    fetch(`/api/usage/stats?period=${period}`)
+    const qs = new URLSearchParams({ period });
+    if (providerFilter) qs.set("provider", providerFilter);
+    fetch(`/api/usage/stats?${qs}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) {
+          syncServerClock(data.serverNow);
           hasLoadedStats.current = true;
           setStats((prev) => ({ ...prev, ...data }));
         }
@@ -278,15 +296,16 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         setLoading(false);
         setFetching(false);
       });
-  }, [period]);
+  }, [period, providerFilter]);
 
   // SSE connection - real-time updates for activeRequests + recentRequests only
   useEffect(() => {
-    const es = new EventSource("/api/usage/stream");
+    const es = new EventSource(providerFilter ? `/api/usage/stream?provider=${encodeURIComponent(providerFilter)}` : "/api/usage/stream");
 
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data);
+        syncServerClock(data.serverNow);
         // Always merge only real-time fields, never overwrite full stats from REST
         setStats((prev) => {
           if (!prev) return prev;
@@ -307,7 +326,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     es.onerror = () => setLoading(false);
 
     return () => es.close();
-  }, []);
+  }, [providerFilter]);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -437,6 +456,15 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     }
   }, [stats, tableView, sortBy, sortOrder]);
 
+  // Connected providers plus any provider seen in the current stats.
+  const providerOptions = useMemo(() => {
+    const ids = new Set(providers.map((p) => p.provider));
+    for (const id of Object.keys(stats?.byProvider || {})) if (id) ids.add(id);
+    if (providerFilter) ids.add(providerFilter);
+    const label = (id) => providers.find((p) => p.provider === id)?.nodeName || AI_PROVIDERS[id]?.name || id;
+    return [...ids].map((id) => ({ id, label: label(id) })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [providers, stats?.byProvider, providerFilter]);
+
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
   const spinner = (
@@ -468,6 +496,24 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         </div>
       )}
 
+      {/* Provider filter */}
+      <div className="flex items-center gap-2 sm:self-end">
+        <label htmlFor="usage-provider-filter" className="text-sm text-text-muted">Provider</label>
+        <select
+          id="usage-provider-filter"
+          value={providerFilter}
+          onChange={(e) => setProviderFilter(e.target.value)}
+          disabled={fetching}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text-main focus:outline-none focus:ring-2 focus:ring-primary/50"
+          style={{ colorScheme: "auto" }}
+        >
+          <option value="">All providers</option>
+          {providerOptions.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Overview cards */}
       {loading ? spinner : <OverviewCards stats={stats} />}
 
@@ -475,7 +521,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       {loading ? spinner : (
         <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
           <ProviderTopology
-            providers={providers}
+            providers={providerFilter ? providers.filter((p) => p.provider === providerFilter) : providers}
             activeRequests={stats.activeRequests || []}
             lastProvider={stats.recentRequests?.[0]?.provider || ""}
             errorProvider={stats.errorProvider || ""}
@@ -485,7 +531,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       )}
 
       {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} />}
+      {loading ? spinner : <UsageChart period={period} provider={providerFilter} />}
 
       {/* Provider and model breakdown charts */}
       {!loading && (stats.byProvider || stats.byModel) && (

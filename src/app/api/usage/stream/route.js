@@ -2,7 +2,8 @@ import { getUsageStats, statsEmitter, getActiveRequests } from "@/lib/usageDb";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request) {
+  const provider = new URL(request.url).searchParams.get("provider") || "";
   const encoder = new TextEncoder();
   const state = { closed: false, keepalive: null, send: null, sendPending: null, cachedStats: null };
 
@@ -14,12 +15,12 @@ export async function GET() {
         try {
           // Push lightweight update immediately so UI reflects changes fast
           if (state.cachedStats) {
-            const { activeRequests, recentRequests, errorProvider } = await getActiveRequests();
-            const quickStats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider };
+            const { activeRequests, recentRequests, errorProvider, serverNow } = await getActiveRequests(provider);
+            const quickStats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider, serverNow };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(quickStats)}\n\n`));
           }
           // Then do full recalc and update cache
-          const stats = await getUsageStats();
+          const stats = await getUsageStats("all", { provider });
           state.cachedStats = stats;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(stats)}\n\n`));
         } catch {
@@ -34,8 +35,8 @@ export async function GET() {
       state.sendPending = async () => {
         if (state.closed || !state.cachedStats) return;
         try {
-          const { activeRequests, recentRequests, errorProvider } = await getActiveRequests();
-          const stats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider };
+          const { activeRequests, recentRequests, errorProvider, serverNow } = await getActiveRequests(provider);
+          const stats = { ...state.cachedStats, activeRequests, recentRequests, errorProvider, serverNow };
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(stats)}\n\n`));
         } catch {
           state.closed = true;

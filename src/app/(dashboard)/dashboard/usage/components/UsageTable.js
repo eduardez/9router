@@ -7,6 +7,9 @@ import Badge from "@/shared/components/Badge";
 
 const fmt = (n) => new Intl.NumberFormat().format(n || 0);
 const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+// 1.2K / 3.4M / 1.0B — compact so chart axes never overflow.
+const compactFmt = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const fmtTokens = (n) => compactFmt.format(n || 0);
 
 function fmtTime(iso) {
   if (!iso) return "Never";
@@ -252,4 +255,4 @@ UsageTable.propTypes = {
 };
 
 // Re-export utilities for use in UsageStats orchestrator
-export { fmt, fmtCost, fmtTime };
+export { fmt, fmtCost, fmtTime, fmtTokens };
