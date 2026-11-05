@@ -135,9 +135,11 @@ export class DefaultExecutor extends BaseExecutor {
     return { ...body, tags: [...new Set(tags)] };
   }
 
-  // Fallback json_schema → json_object for openai-compatible providers without native Structured Output.
+  // Fallback json_schema → json_object for providers without native Structured Output.
+  // Covers the openai-compatible-* lane and native DeepSeek, whose API only documents
+  // json_object and answers 400 "This response_format type is unavailable now" (#81).
   applyJsonSchemaFallback(body) {
-    if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    if (this.provider !== "deepseek" && !this.provider?.startsWith?.("openai-compatible-")) return body;
     const rf = body?.response_format;
     if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return body;
 
