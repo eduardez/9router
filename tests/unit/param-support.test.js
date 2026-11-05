@@ -197,6 +197,25 @@ describe("stripUnsupportedParams", () => {
       {},
     );
     expect(plain.response_format).toBeUndefined();
+
+    // DeepSeek rejects the type itself, so a schema-less json_schema is downgraded too
+    // (openai-compatible-* keeps it, since there is nothing to inject).
+    const schematic = executor.transformRequest(
+      "deepseek-flash",
+      { messages: [{ role: "user", content: "hi" }], response_format: { type: "json_schema", json_schema: { name: "x" } } },
+      false,
+      {},
+    );
+    expect(schematic.response_format).toEqual({ type: "json_object" });
+    expect(schematic.messages[0].role).toBe("system");
+    expect(
+      new DefaultExecutor("openai-compatible-foo").transformRequest(
+        "m",
+        { messages: [{ role: "user", content: "hi" }], response_format: { type: "json_schema", json_schema: { name: "x" } } },
+        false,
+        {},
+      ).response_format,
+    ).toEqual({ type: "json_schema", json_schema: { name: "x" } });
   });
 
   it("renames max_tokens to max_completion_tokens for the openai provider", () => {
