@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **OpenCode Free**: burn a canonical session that answers `429 FreeUsageLimitError` and retry the request once with a freshly minted session id — the free quota is accounted per session, so the same id kept failing every request on that identity, and a caller-supplied native `x-opencode-session` is left untouched (Refs #82)
+
 # v0.5.112 (2026-10-28)
 
 ## Features
