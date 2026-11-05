@@ -434,6 +434,8 @@ describe("App-layer custom transport resolution (stt.js)", () => {
         getCustomModels: async () => ([{
           providerAlias: "gemini", id: "probe-sttjs-1", type: "stt", transport: "gemini-live",
         }]),
+        getProviderConnections: async () => [],
+        getProviderNodes: async () => [],
       }));
       vi.doMock(AUTH, () => ({
         extractApiKey: () => null,
