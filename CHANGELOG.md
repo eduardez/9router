@@ -7,6 +7,7 @@
 - **Codex**: add `gpt-6.1-terra` (responses-lite lane, GPT-6-Lite thinking levels)
 
 ## Fixes
+- **NVIDIA NIM**: refresh the catalog to live `/v1/models` ids (retired ids answer 410, unlisted ones a bare-text 404) and forward dash-version client ids (`z-ai/glm-5-3-flash`) as the dotted id NIM serves, so requests stop dying with `404 page not found` (#84)
 - **NVIDIA NIM**: normalize assistant `reasoning` aliases to `reasoning_content` before forwarding, avoiding NIM's duplicate-field 400 when clients send both.
 - **Lazy Runtime**: make the on-demand wreq-js/playwright-core installer work inside published builds — fetch `createRequire` at runtime instead of the bundler-stubbed static import, mark the runtime-dir `import()` calls `webpackIgnore` so file URLs are not captured as bundle chunks, anchor npm to the runtime dir with a minimal `package.json`, and wipe + reinstall once when npm exits 0 on a partially-extracted package (#5245)
 - **Docker**: bake `wreq-js` and `playwright-core` into the runner image's `node_modules` (builder-stage isolated install) so OpenCode Free resolves without runtime downloads (#5245)
