@@ -225,6 +225,10 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 
   // Ollama
   if (targetFormat === FORMATS.OLLAMA) {
+    // Some deployments in front of Ollama (proxies, OpenAI-compatible shims) answer in
+    // OpenAI shape. Re-reading such a body as Ollama drops content and usage, so pass it
+    // through untouched — same guard the Claude branch above uses.
+    if (Array.isArray(responseBody.choices)) return responseBody;
     return ollamaBodyToOpenAI(responseBody);
   }
 
