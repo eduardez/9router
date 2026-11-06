@@ -19,7 +19,7 @@ for (const entry of REGISTRY) {
 // virtual "noauth" account), so an empty connection table does not mean they
 // are unused — they keep their prefix over any same-prefix node.
 const NOAUTH_PROVIDER_IDS = new Set(
-  REGISTRY.filter((entry) => entry.noAuth && entry.category === "free").map((entry) => entry.id)
+  REGISTRY.filter((entry) => entry.noAuth).map((entry) => entry.id)
 );
 
 export function parseModel(modelStr) {
