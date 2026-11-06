@@ -1,5 +1,5 @@
 import { getApiKeys } from "@/lib/localDb";
-import { resolveProviderId } from "@/shared/constants/providers.js";
+import { DASHBOARD_TEST_DISABLED_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
@@ -56,6 +56,9 @@ async function getInternalHeaders() {
 }
 
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
+  const blockedReason = DASHBOARD_TEST_DISABLED_PROVIDERS.get(resolveProviderId(String(model).split("/")[0]));
+  if (blockedReason) return { ok: false, latencyMs: 0, error: blockedReason };
+
   const headers = await getInternalHeaders();
   const start = Date.now();
 
