@@ -151,7 +151,6 @@ describe("stripUnsupportedParams", () => {
     const response_format = { type: "json_schema", json_schema: { name: "t", schema: { type: "object" } } };
 
     for (const [provider, model] of [
-      ["deepseek", "deepseek-reasoner"],
       ["opencode-zen", "deepseek-v4.1-flash"],
       ["openrouter", "deepseek/deepseek-v3.2"],
     ]) {
@@ -159,6 +158,64 @@ describe("stripUnsupportedParams", () => {
       stripUnsupportedParams(provider, model, body);
       expect(body.response_format).toBe(response_format);
     }
+  });
+
+  it("downgrades json_schema to json_object for the native DeepSeek provider", () => {
+    const schema = { type: "object", properties: { answer: { type: "string" } }, required: ["answer"] };
+    const body = {
+      model: "deepseek-flash",
+      messages: [{ role: "user", content: "Is the sky blue?" }],
+      response_format: { type: "json_schema", json_schema: { name: "x", schema } },
+    };
+
+    const transformed = new DefaultExecutor("deepseek").transformRequest("deepseek-flash", body, false, {});
+
+    expect(transformed.response_format).toEqual({ type: "json_object" });
+    expect(transformed.messages[0].role).toBe("system");
+    expect(transformed.messages[0].content).toContain(JSON.stringify(schema, null, 2));
+    expect(transformed.messages[0].content.toLowerCase()).toContain("json");
+    expect(transformed.messages[1]).toEqual({ role: "user", content: "Is the sky blue?" });
+  });
+
+  it("leaves json_object and format-less requests untouched for the native DeepSeek provider", () => {
+    const executor = new DefaultExecutor("deepseek");
+    const response_format = { type: "json_object" };
+
+    const withFormat = executor.transformRequest(
+      "deepseek-flash",
+      { messages: [{ role: "user", content: "hi" }], response_format },
+      false,
+      {},
+    );
+    expect(withFormat.response_format).toEqual(response_format);
+    expect(withFormat.messages).toEqual([{ role: "user", content: "hi" }]);
+
+    const plain = executor.transformRequest(
+      "deepseek-flash",
+      { messages: [{ role: "user", content: "hi" }] },
+      false,
+      {},
+    );
+    expect(plain.response_format).toBeUndefined();
+
+    // DeepSeek rejects the type itself, so a schema-less json_schema is downgraded too
+    // (openai-compatible-* keeps it, since there is nothing to inject).
+    const schematic = executor.transformRequest(
+      "deepseek-flash",
+      { messages: [{ role: "user", content: "hi" }], response_format: { type: "json_schema", json_schema: { name: "x" } } },
+      false,
+      {},
+    );
+    expect(schematic.response_format).toEqual({ type: "json_object" });
+    expect(schematic.messages[0].role).toBe("system");
+    expect(
+      new DefaultExecutor("openai-compatible-foo").transformRequest(
+        "m",
+        { messages: [{ role: "user", content: "hi" }], response_format: { type: "json_schema", json_schema: { name: "x" } } },
+        false,
+        {},
+      ).response_format,
+    ).toEqual({ type: "json_schema", json_schema: { name: "x" } });
   });
 
   it("renames max_tokens to max_completion_tokens for the openai provider", () => {

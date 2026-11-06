@@ -350,3 +350,77 @@ describe("OpenCode Stable Session Reuse (429 follow-up)", () => {
     expect(PROVIDERS.opencode?.forceStream).toBe(true);
   });
 });
+
+describe("OpenCode Free 429 session rotation", () => {
+  const logStub = { debug() { }, warn() { }, info() { }, error() { } };
+
+  it("retries once with a freshly minted session after a 429", async () => {
+    const executor = getExecutor("opencode");
+    const sessions = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      sessions.push(options.headers["x-opencode-session"]);
+      return new Response('{"type":"error","error":{"type":"FreeUsageLimitError","message":"Free usage limit reached."}}', {
+        status: sessions.length === 1 ? 429 : 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const result = await executor.execute({
+      model: "big-pickle",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      stream: true,
+      credentials: makeCredentials({ connectionId: "conn_429_retry" }),
+      log: logStub,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sessions[0]).toMatch(OPENCODE_SESSION_RE);
+    expect(sessions[1]).toMatch(OPENCODE_SESSION_RE);
+    expect(sessions[1]).not.toBe(sessions[0]);
+    expect(result.response.status).toBe(200);
+    // The rotated session is now the conversation's session, not just a one-off.
+    const next = executor.prepareRequestCredentials({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: makeCredentials({ connectionId: "conn_429_retry" }),
+    });
+    expect(next._opencodeSession).toBe(sessions[1]);
+  });
+
+  it("re-transforms the Responses body identically for the retry", () => {
+    const executor = getExecutor("opencode");
+    const body = {
+      instructions: "sys",
+      input: [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }],
+      tools: [{ type: "function", name: "zcode_search", description: "d", strict: true, parameters: { type: "object", properties: {} } }],
+      tool_choice: "auto",
+    };
+
+    executor.transformRequest("muse-spark-1.3-contributor-free", body, true, {});
+    const first = JSON.stringify(body);
+    executor.transformRequest("muse-spark-1.3-contributor-free", body, true, {});
+
+    expect(JSON.stringify(body)).toBe(first);
+    expect(body.tools.find((tool) => tool.name === "zcode_search").strict).toBe(true);
+  });
+
+  it("leaves a caller-supplied native session alone and does not retry", async () => {
+    const executor = getExecutor("opencode");
+    const native = "ses_f534dfae8ffeCy4Ee4tLWNygDc";
+    fetchMock.mockResolvedValue(new Response("{}", { status: 429 }));
+
+    const result = await executor.execute({
+      model: "big-pickle",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      stream: true,
+      credentials: makeCredentials({
+        connectionId: "conn_429_native",
+        rawHeaders: { "x-opencode-session": native },
+      }),
+      log: logStub,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].headers["x-opencode-session"]).toBe(native);
+    expect(result.response.status).toBe(429);
+  });
+});

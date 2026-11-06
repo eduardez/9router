@@ -110,6 +110,18 @@ export const AUTH_METHODS = {
   cookie: { id: "cookie" },
 };
 
+// Providers whose dashboard "Test" probe must never reach upstream, mapped to the
+// reason shown to the user. OpenCode Free flags the probe (deprecated v1 client
+// headers, no v2 session/fingerprint gates) and latches the IP out with a
+// 429 FreeUsageLimitError / 403 FreeTierError, breaking later real traffic.
+// Exercise these models from a client instead (Refs #79).
+export const DASHBOARD_TEST_DISABLED_PROVIDERS = new Map([
+  [
+    "opencode",
+    "OpenCode Free cannot be tested from the dashboard — upstream blocks the test probe (429/403) and locks the IP. Use the model from your client instead.",
+  ],
+]);
+
 // Helper: Get provider by alias
 export function getProviderByAlias(alias) {
   for (const provider of Object.values(AI_PROVIDERS)) {

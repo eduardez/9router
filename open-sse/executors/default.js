@@ -135,13 +135,19 @@ export class DefaultExecutor extends BaseExecutor {
     return { ...body, tags: [...new Set(tags)] };
   }
 
-  // Fallback json_schema → json_object for openai-compatible providers without native Structured Output.
+  // Fallback json_schema → json_object for providers without native Structured Output.
+  // Covers the openai-compatible-* lane and native DeepSeek, whose API only documents
+  // json_object and answers 400 "This response_format type is unavailable now" (#81).
   applyJsonSchemaFallback(body) {
-    if (!this.provider?.startsWith?.("openai-compatible-")) return body;
+    const isDeepseek = this.provider === "deepseek";
+    if (!isDeepseek && !this.provider?.startsWith?.("openai-compatible-")) return body;
     const rf = body?.response_format;
-    if (rf?.type !== "json_schema" || !rf.json_schema?.schema) return body;
+    if (rf?.type !== "json_schema") return body;
+    // DeepSeek rejects the json_schema type outright, even without a schema payload;
+    // openai-compatible-* only downgrades when there is a schema to inject (#81).
+    if (!rf.json_schema?.schema && !isDeepseek) return body;
 
-    const schemaJson = JSON.stringify(rf.json_schema.schema, null, 2);
+    const schemaJson = JSON.stringify(rf.json_schema?.schema ?? {}, null, 2);
     const prompt = `You must respond with valid JSON that strictly follows this JSON schema:\n\`\`\`json\n${schemaJson}\n\`\`\`\nRespond ONLY with the JSON object, no other text.`;
 
     const messages = Array.isArray(body.messages) ? body.messages.map(m => ({ ...m })) : [];

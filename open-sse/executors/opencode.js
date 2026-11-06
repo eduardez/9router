@@ -171,6 +171,23 @@ export function stableSessionId(credentials) {
   return sessionId;
 }
 
+// Burn the session that just answered 429 FreeUsageLimitError: upstream tracks the
+// free quota per session id, so a spent id keeps failing every request on this
+// identity/conversation. Rebinding (not just deleting) keeps the conversation on
+// one stable session — a fresh id per request burns quota faster.
+export function rotateOpencodeSession(args = {}) {
+  const credentials = args.credentials || {};
+  const current = resolveOpencodeSession(args.body, credentials, args.providerSessionId, args.clientTool);
+  const fresh = generateSessionId();
+  const key = identityKey(credentials);
+  stableOpencodeSessions.delete(key);
+  stableOpencodeSessions.set(key, { sessionId: fresh, lastUsed: Date.now() });
+  for (const entry of translatedOpencodeSessions.values()) {
+    if (entry.sessionId === current) entry.sessionId = fresh;
+  }
+  return fresh;
+}
+
 function bodyHasSessionHints(body) {
   try {
     if (!body || typeof body !== "object") return false;
@@ -265,11 +282,16 @@ function normalizeResponsesTools(body) {
       ? tool.parameters
       : (fn?.parameters && typeof fn.parameters === "object" && !Array.isArray(fn.parameters) ? fn.parameters : { type: "object", properties: {} });
     if (parameters.type === "object" && !parameters.properties) parameters = { ...parameters, properties: {} };
+    const strict = tool.strict;
     for (const k of Object.keys(tool)) delete tool[k];
     tool.type = "function";
     tool.name = name.slice(0, MAX_TOOL_NAME_LEN);
     if (description) tool.description = description;
     tool.parameters = parameters;
+    // Responses' `strict` flag survives the rebuild: the free lane re-runs this
+    // normalization on the 429 retry, and dropping it here would change the
+    // fingerprint tool shape the upstream accepts on the second attempt.
+    if (strict !== undefined) tool.strict = strict;
     validNames.add(tool.name);
     return true;
   });
@@ -408,16 +430,20 @@ export class OpenCodeExecutor extends BaseExecutor {
   // `directFetch` when no proxy is configured). Fail-open: without wreq-js the
   // request still goes out on native fetch instead of erroring here.
   async execute(args) {
-    const credentials = this.prepareRequestCredentials(args);
-    return super.execute({
-      ...args,
-      credentials,
-      directFetch: (url, options) => opencodeTlsFetch(url, {
-        method: options.method,
-        headers: options.headers,
-        body: options.body,
-      }, { signal: options.signal }),
-    });
+    const directFetch = (url, options) => opencodeTlsFetch(url, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+    }, { signal: options.signal });
+    const run = (credentials) => super.execute({ ...args, credentials, directFetch });
+
+    const result = await run(this.prepareRequestCredentials(args));
+    // Free-tier quota is spent per session id: retry once on a freshly minted
+    // session instead of handing the client a 429 the account can still avoid.
+    // A caller-supplied native x-opencode-session cannot be rotated — leave it.
+    if (result?.response?.status !== 429 || nativeSession(args.credentials?.rawHeaders)) return result;
+    rotateOpencodeSession(args);
+    return run(this.prepareRequestCredentials(args));
   }
 
   // Free tier moved from /zen/v1 to /inference/v1 (OpenCode v2); /zen/v1 now
