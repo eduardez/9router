@@ -836,6 +836,31 @@ export default function ProviderDetailPage() {
     });
   };
 
+  const handleBulkSetActive = async (isActive) => {
+    const ids = [...selectedConnectionIds];
+    if (ids.length === 0) return;
+    const updated = [];
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        const res = await fetch(`/api/providers/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isActive }),
+        });
+        if (res.ok) updated.push(id);
+        else failed += 1;
+      } catch (error) {
+        console.log("Error updating connection status:", error);
+        failed += 1;
+      }
+    }
+    if (updated.length > 0) {
+      setConnections(prev => prev.map(c => updated.includes(c.id) ? { ...c, isActive } : c));
+    }
+    if (failed > 0) alert(`Updated ${updated.length} connection(s), ${failed} failed.`);
+  };
+
   const handleOAuthSuccess = () => {
     fetchConnections();
     setShowOAuthModal(false);
@@ -933,6 +958,7 @@ export default function ProviderDetailPage() {
 
   const selectedConnections = connections.filter((conn) => selectedConnectionIds.includes(conn.id));
   const allSelected = connections.length > 0 && selectedConnectionIds.length === connections.length;
+  const allSelectedInactive = selectedConnections.length > 0 && selectedConnections.every((conn) => conn.isActive === false);
 
   const toggleSelectConnection = (connectionId) => {
     setSelectedConnectionIds((prev) => (
@@ -1543,14 +1569,24 @@ export default function ProviderDetailPage() {
               {connections.length > 0 && (
                 <>
                   {selectedConnectionIds.length > 0 && (
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon="delete"
-                      onClick={handleBulkDelete}
-                    >
-                      Delete Selected ({selectedConnectionIds.length})
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        icon={allSelectedInactive ? "power_settings_new" : "block"}
+                        onClick={() => handleBulkSetActive(allSelectedInactive)}
+                      >
+                        {allSelectedInactive ? "Enable" : "Disable"} Selected ({selectedConnectionIds.length})
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon="delete"
+                        onClick={handleBulkDelete}
+                      >
+                        Delete Selected ({selectedConnectionIds.length})
+                      </Button>
+                    </>
                   )}
                   <Button
                     size="sm"
