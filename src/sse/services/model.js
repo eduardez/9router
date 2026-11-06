@@ -15,6 +15,12 @@ for (const entry of REGISTRY) {
   if (entry.alias) RESERVED_PROVIDER_PREFIXES.add(entry.alias);
   for (const alias of entry.aliases || []) RESERVED_PROVIDER_PREFIXES.add(alias);
 }
+// Built-ins that authenticate without a stored connection (auth.js injects a
+// virtual "noauth" account), so an empty connection table does not mean they
+// are unused — they keep their prefix over any same-prefix node.
+const NOAUTH_PROVIDER_IDS = new Set(
+  REGISTRY.filter((entry) => entry.noAuth && entry.category === "free").map((entry) => entry.id)
+);
 
 export function parseModel(modelStr) {
   const parsed = parseModelCore(modelStr);
@@ -70,7 +76,7 @@ export async function getModelInfo(modelStr) {
     // credentials while a node with the same prefix does. A node created before
     // its provider entered the registry (`atria`) owns that prefix in practice,
     // and the built-in would otherwise 404 "No active credentials" (#78).
-    if (!(await hasActiveConnection(parsed.provider))) {
+    if (!NOAUTH_PROVIDER_IDS.has(parsed.provider) && !(await hasActiveConnection(parsed.provider))) {
       const node = await findNodeByPrefix(parsed.providerAlias);
       if (node && (await hasActiveConnection(node.id))) {
         return { provider: node.id, model: parsed.model };

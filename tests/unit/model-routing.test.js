@@ -156,4 +156,32 @@ describe("model routing", () => {
         model: "Atria-Dawn",
       });
   });
+
+  it("keeps a noAuth free built-in ahead of a same-prefix node", async () => {
+    const ctx = await setupDb();
+    cleanup = ctx.cleanup;
+
+    await ctx.createProviderNode({
+      id: "openai-compatible-chat-oc",
+      type: "openai-compatible",
+      name: "Compatible OpenCode",
+      prefix: "oc",
+      apiType: "chat",
+      baseUrl: "https://compatible.test/v1",
+    });
+    await ctx.createProviderConnection({
+      provider: "openai-compatible-chat-oc",
+      authType: "apikey",
+      name: "Compatible OpenCode key",
+      apiKey: "sk-oc",
+    });
+
+    // opencode authenticates without a stored connection (virtual noauth account),
+    // so the empty pool must not hand its prefix to the node.
+    await expect(ctx.getModelInfo("oc/grok-code-fast-1"))
+      .resolves.toEqual({
+        provider: "opencode",
+        model: "grok-code-fast-1",
+      });
+  });
 });
